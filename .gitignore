@@ -1,0 +1,26 @@
+# 飞象课程封面生成器
+
+## 环境变量
+.env
+
+## Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+## 生成的临时文件
+generated_cover.png
+input_screenshot.png
+batch_output/
+
+## 系统文件
+.DS_Store
+Thumbs.db
+
+## IDE
+.vscode/
+.idea/
+
+## 测试数据
+待处理.xls
+封面图片浏览器截图/
