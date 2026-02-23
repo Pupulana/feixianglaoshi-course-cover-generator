@@ -61,7 +61,7 @@ def generate_cover(prompt, output_path="generated_cover.png"):
         "response_format": "url",
         "size": "2560x1440",  # API 支持的标准尺寸，下载后缩放
         "stream": False,
-        "watermark": True
+        "watermark": False
     }
 
     try:

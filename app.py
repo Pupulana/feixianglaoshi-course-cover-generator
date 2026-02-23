@@ -13,7 +13,7 @@ load_dotenv()
 
 st.set_page_config(layout="wide", page_title="飞象课程封面生成器")
 
-st.title("🐘 飞象课程封面生成器")
+st.title("飞象老师封面生成器")
 
 # Sidebar
 with st.sidebar:
@@ -98,10 +98,10 @@ with tab2:
             os.makedirs(screenshot_dir, exist_ok=True)
             os.makedirs(covers_dir, exist_ok=True)
             
-            # 初始化数据
+            # 初始化数据（增加 prompt 字段）
             if 'batch_data' not in st.session_state or st.session_state.get('batch_file_name') != uploaded_file.name:
                 st.session_state['batch_data'] = [
-                    {"序号": i+1, "URL": url, "状态": "⏳ 待处理", "截图路径": None, "封面路径": None}
+                    {"序号": i+1, "URL": url, "状态": "⏳ 待处理", "截图路径": None, "封面路径": None, "prompt": ""}
                     for i, url in enumerate(urls)
                 ]
                 st.session_state['batch_file_name'] = uploaded_file.name
@@ -111,8 +111,18 @@ with tab2:
             with btn_col1:
                 start_btn = st.button("🚀 开始批量生成", type="primary")
             with btn_col2:
-                # 批量导出占位符
-                export_placeholder = st.empty()
+                # 批量导出
+                success_rows = [r for r in st.session_state['batch_data'] if r.get('状态') == "✅ 成功"]
+                if len(success_rows) > 0:
+                    zip_buffer = io.BytesIO()
+                    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                        for r in success_rows:
+                            if r.get('封面路径') and os.path.exists(r['封面路径']):
+                                zf.write(r['封面路径'], os.path.basename(r['封面路径']))
+                    zip_buffer.seek(0)
+                    st.download_button(f"📦 批量导出 ({len(success_rows)})", zip_buffer, "batch_covers.zip", "application/zip", key="export_all")
+                else:
+                    st.button("📦 批量导出", disabled=True, key="export_disabled_empty")
             
             # 进度条占位符
             progress_placeholder = st.empty()
@@ -120,12 +130,10 @@ with tab2:
             st.markdown("---")
             st.subheader("📊 处理结果")
             
-            # 为每行创建占位符
-            row_placeholders = [st.empty() for _ in urls]
-            
-            # 渲染单行
-            def render_row(placeholder, row):
-                with placeholder.container():
+            # ===== 渲染每一行（静态，非 placeholder）=====
+            for idx, row in enumerate(st.session_state['batch_data']):
+                with st.container():
+                    # 头部信息行
                     hcols = st.columns([0.5, 3, 1, 1.5])
                     with hcols[0]:
                         st.markdown(f"### #{row['序号']}")
@@ -136,10 +144,11 @@ with tab2:
                     with hcols[3]:
                         if row.get('封面路径') and os.path.exists(row['封面路径']):
                             with open(row['封面路径'], "rb") as f:
-                                st.download_button("📥 下载", f.read(), f"cover_{row['序号']:03d}.png", "image/png", key=f"dl_{row['序号']}_{row['状态']}")
+                                st.download_button("📥 下载", f.read(), f"cover_{row['序号']:03d}.png", "image/png", key=f"dl_{row['序号']}")
                         else:
                             st.markdown("*待生成*")
                     
+                    # 截图 + 封面预览
                     icols = st.columns(2)
                     with icols[0]:
                         st.markdown("**📸 截图**")
@@ -153,35 +162,53 @@ with tab2:
                             st.image(row['封面路径'], use_container_width=True)
                         else:
                             st.info("待生成")
+                    
+                    # 提示词编辑 + 重新生成（仅当有 prompt 时显示）
+                    if row.get('prompt'):
+                        st.markdown("**📝 提示词**")
+                        new_prompt = st.text_area(
+                            f"编辑提示词 #{row['序号']}",
+                            value=row['prompt'],
+                            height=150,
+                            key=f"prompt_{row['序号']}",
+                            label_visibility="collapsed"
+                        )
+                        # 同步编辑内容到 session_state
+                        st.session_state['batch_data'][idx]['prompt'] = new_prompt
+                        
+                        regen_btn = st.button("🔄 重新生成", key=f"regen_{row['序号']}", type="secondary")
+                        
+                        # 处理重新生成
+                        if regen_btn:
+                            current_prompt = st.session_state['batch_data'][idx]['prompt']
+                            if current_prompt:
+                                cover_save_path = os.path.join(covers_dir, f"cover_{idx+1:03d}.png")
+                                with st.spinner(f"正在重新生成 #{row['序号']} 的封面..."):
+                                    cover_path = generate_cover(current_prompt, output_path=cover_save_path)
+                                    if cover_path and os.path.exists(cover_path):
+                                        st.session_state['batch_data'][idx]['封面路径'] = cover_save_path
+                                        st.session_state['batch_data'][idx]['状态'] = "✅ 成功"
+                                        st.success(f"✅ #{row['序号']} 封面已重新生成！")
+                                        st.rerun()
+                                    else:
+                                        st.error(f"❌ #{row['序号']} 重新生成失败")
+                            else:
+                                st.warning("提示词不能为空")
+                    
                     st.markdown("---")
             
-            # 渲染批量导出按钮
-            def render_export():
-                success_count = sum(1 for r in st.session_state['batch_data'] if r.get('状态') == "✅ 成功")
-                with export_placeholder.container():
-                    if success_count > 0:
-                        zip_buffer = io.BytesIO()
-                        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-                            for r in st.session_state['batch_data']:
-                                if r.get('封面路径') and os.path.exists(r['封面路径']):
-                                    zf.write(r['封面路径'], os.path.basename(r['封面路径']))
-                        zip_buffer.seek(0)
-                        st.download_button(f"📦 批量导出 ({success_count})", zip_buffer, "batch_covers.zip", "application/zip", key=f"export_{success_count}")
-                    else:
-                        st.button("📦 批量导出", disabled=True)
-            
-            # 初始渲染
-            render_export()
-            for i, row in enumerate(st.session_state['batch_data']):
-                render_row(row_placeholders[i], row)
-            
-            # 处理
+            # ===== 批量生成处理流程 =====
             if start_btn:
-                for i, url in enumerate(urls):
-                    progress_placeholder.progress(i / len(urls), text=f"⏳ 正在处理 {i+1}/{len(urls)}")
+                # 为批量生成创建占位符
+                batch_row_placeholders = [st.empty() for _ in st.session_state['batch_data']]
+                
+                total = len(st.session_state['batch_data'])
+                for i, row_data in enumerate(st.session_state['batch_data']):
+                    progress_placeholder.progress(i / total, text=f"⏳ 正在处理 {i+1}/{total}")
                     
+                    # 使用 batch_data 中存储的 URL，确保与显示一致
+                    url = row_data['URL']
                     st.session_state['batch_data'][i]['状态'] = "🔄 处理中..."
-                    render_row(row_placeholders[i], st.session_state['batch_data'][i])
                     
                     screenshot_save_path = os.path.join(screenshot_dir, f"screenshot_{i+1:03d}.png")
                     cover_save_path = os.path.join(covers_dir, f"cover_{i+1:03d}.png")
@@ -191,10 +218,12 @@ with tab2:
                         if screenshot_path and os.path.exists(screenshot_path):
                             shutil.copy(screenshot_path, screenshot_save_path)
                             st.session_state['batch_data'][i]['截图路径'] = screenshot_save_path
-                            render_row(row_placeholders[i], st.session_state['batch_data'][i])
                             
                             result = analyze_image(screenshot_path)
                             prompt = result.get("prompt", "")
+                            
+                            # 保存 prompt 到 batch_data
+                            st.session_state['batch_data'][i]['prompt'] = prompt
                             
                             if prompt and not prompt.startswith("Error"):
                                 cover_path = generate_cover(prompt, output_path=cover_save_path)
@@ -209,13 +238,10 @@ with tab2:
                             st.session_state['batch_data'][i]['状态'] = "❌ 截图失败"
                     except Exception as e:
                         st.session_state['batch_data'][i]['状态'] = "❌ 错误"
-                    
-                    # 更新当前行和导出按钮
-                    render_row(row_placeholders[i], st.session_state['batch_data'][i])
-                    render_export()
                 
-                progress_placeholder.progress(1.0, text="✅ 全部完成！")
+                progress_placeholder.progress(1.0, text="✅ 全部完成！请检查各项结果，编辑提示词并确认后批量导出。")
                 st.balloons()
+                st.rerun()
         
         except Exception as e:
             st.error(f"读取 Excel 文件失败: {e}")
