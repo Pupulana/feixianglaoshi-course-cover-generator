@@ -124,13 +124,32 @@ with tab2:
                 else:
                     st.button("📦 批量导出", disabled=True, key="export_disabled_empty")
             
-            # 进度条占位符
-            progress_placeholder = st.empty()
+            # 当点击开始按钮时，启动批量处理
+            if start_btn:
+                st.session_state['batch_processing_index'] = 0
+                # 重置所有行状态
+                for i in range(len(st.session_state['batch_data'])):
+                    st.session_state['batch_data'][i]['状态'] = "⏳ 待处理"
+                    st.session_state['batch_data'][i]['截图路径'] = None
+                    st.session_state['batch_data'][i]['封面路径'] = None
+                    st.session_state['batch_data'][i]['prompt'] = ""
+                st.rerun()
+            
+            # 检查是否正在批量处理
+            processing_idx = st.session_state.get('batch_processing_index', -1)
+            total = len(st.session_state['batch_data'])
+            is_processing = 0 <= processing_idx < total
+            
+            # 进度条
+            if is_processing:
+                st.progress(processing_idx / total, text=f"⏳ 正在处理 {processing_idx + 1}/{total}")
+            elif processing_idx >= total:
+                st.progress(1.0, text="✅ 全部完成！请检查各项结果，编辑提示词并确认后批量导出。")
             
             st.markdown("---")
             st.subheader("📊 处理结果")
             
-            # ===== 渲染每一行（静态，非 placeholder）=====
+            # ===== 渲染所有卡片（始终带完整交互控件） =====
             for idx, row in enumerate(st.session_state['batch_data']):
                 with st.container():
                     # 头部信息行
@@ -138,7 +157,9 @@ with tab2:
                     with hcols[0]:
                         st.markdown(f"### #{row['序号']}")
                     with hcols[1]:
-                        st.caption(row['URL'][:60] + "..." if len(row['URL']) > 60 else row['URL'])
+                        # 使用 markdown 链接，截断显示但链接指向完整 URL
+                        display_url = row['URL'][:55] + "..." if len(row['URL']) > 55 else row['URL']
+                        st.markdown(f"🔗 [{display_url}]({row['URL']})")
                     with hcols[2]:
                         st.markdown(f"**{row['状态']}**")
                     with hcols[3]:
@@ -163,7 +184,7 @@ with tab2:
                         else:
                             st.info("待生成")
                     
-                    # 提示词编辑 + 重新生成（仅当有 prompt 时显示）
+                    # 提示词编辑 + 重新生成
                     if row.get('prompt'):
                         st.markdown("**📝 提示词**")
                         new_prompt = st.text_area(
@@ -171,15 +192,16 @@ with tab2:
                             value=row['prompt'],
                             height=150,
                             key=f"prompt_{row['序号']}",
-                            label_visibility="collapsed"
+                            label_visibility="collapsed",
+                            disabled=is_processing
                         )
-                        # 同步编辑内容到 session_state
                         st.session_state['batch_data'][idx]['prompt'] = new_prompt
                         
-                        regen_btn = st.button("🔄 重新生成", key=f"regen_{row['序号']}", type="secondary")
-                        
-                        # 处理重新生成
-                        if regen_btn:
+                        regen_btn = st.button(
+                            "🔄 重新生成", key=f"regen_{row['序号']}",
+                            type="secondary", disabled=is_processing
+                        )
+                        if regen_btn and not is_processing:
                             current_prompt = st.session_state['batch_data'][idx]['prompt']
                             if current_prompt:
                                 cover_save_path = os.path.join(covers_dir, f"cover_{idx+1:03d}.png")
@@ -197,51 +219,47 @@ with tab2:
                     
                     st.markdown("---")
             
-            # ===== 批量生成处理流程 =====
-            if start_btn:
-                # 为批量生成创建占位符
-                batch_row_placeholders = [st.empty() for _ in st.session_state['batch_data']]
+            # ===== 批量处理：每次处理一个，然后 rerun =====
+            if is_processing:
+                i = processing_idx
+                row_data = st.session_state['batch_data'][i]
+                url = row_data['URL']
                 
-                total = len(st.session_state['batch_data'])
-                for i, row_data in enumerate(st.session_state['batch_data']):
-                    progress_placeholder.progress(i / total, text=f"⏳ 正在处理 {i+1}/{total}")
-                    
-                    # 使用 batch_data 中存储的 URL，确保与显示一致
-                    url = row_data['URL']
-                    st.session_state['batch_data'][i]['状态'] = "🔄 处理中..."
-                    
-                    screenshot_save_path = os.path.join(screenshot_dir, f"screenshot_{i+1:03d}.png")
-                    cover_save_path = os.path.join(covers_dir, f"cover_{i+1:03d}.png")
-                    
-                    try:
-                        screenshot_path = capture_from_url(url)
-                        if screenshot_path and os.path.exists(screenshot_path):
-                            shutil.copy(screenshot_path, screenshot_save_path)
-                            st.session_state['batch_data'][i]['截图路径'] = screenshot_save_path
-                            
-                            result = analyze_image(screenshot_path)
-                            prompt = result.get("prompt", "")
-                            
-                            # 保存 prompt 到 batch_data
-                            st.session_state['batch_data'][i]['prompt'] = prompt
-                            
-                            if prompt and not prompt.startswith("Error"):
-                                cover_path = generate_cover(prompt, output_path=cover_save_path)
-                                if cover_path and os.path.exists(cover_path):
-                                    st.session_state['batch_data'][i]['封面路径'] = cover_save_path
-                                    st.session_state['batch_data'][i]['状态'] = "✅ 成功"
-                                else:
-                                    st.session_state['batch_data'][i]['状态'] = "❌ 生成失败"
+                screenshot_save_path = os.path.join(screenshot_dir, f"screenshot_{i+1:03d}.png")
+                cover_save_path = os.path.join(covers_dir, f"cover_{i+1:03d}.png")
+                
+                st.session_state['batch_data'][i]['状态'] = "🔄 处理中..."
+                
+                try:
+                    screenshot_path = capture_from_url(url)
+                    if screenshot_path and os.path.exists(screenshot_path):
+                        shutil.copy(screenshot_path, screenshot_save_path)
+                        st.session_state['batch_data'][i]['截图路径'] = screenshot_save_path
+                        
+                        result = analyze_image(screenshot_path)
+                        prompt = result.get("prompt", "")
+                        st.session_state['batch_data'][i]['prompt'] = prompt
+                        
+                        if prompt and not prompt.startswith("Error"):
+                            cover_path = generate_cover(prompt, output_path=cover_save_path)
+                            if cover_path and os.path.exists(cover_path):
+                                st.session_state['batch_data'][i]['封面路径'] = cover_save_path
+                                st.session_state['batch_data'][i]['状态'] = "✅ 成功"
                             else:
-                                st.session_state['batch_data'][i]['状态'] = "❌ 分析失败"
+                                st.session_state['batch_data'][i]['状态'] = "❌ 生成失败"
                         else:
-                            st.session_state['batch_data'][i]['状态'] = "❌ 截图失败"
-                    except Exception as e:
-                        st.session_state['batch_data'][i]['状态'] = "❌ 错误"
+                            st.session_state['batch_data'][i]['状态'] = "❌ 分析失败"
+                    else:
+                        st.session_state['batch_data'][i]['状态'] = "❌ 截图失败"
+                except Exception as e:
+                    st.session_state['batch_data'][i]['状态'] = "❌ 错误"
                 
-                progress_placeholder.progress(1.0, text="✅ 全部完成！请检查各项结果，编辑提示词并确认后批量导出。")
-                st.balloons()
+                # 处理完当前项，推进到下一个并 rerun
+                st.session_state['batch_processing_index'] = i + 1
+                if i + 1 >= total:
+                    st.balloons()
                 st.rerun()
         
         except Exception as e:
             st.error(f"读取 Excel 文件失败: {e}")
+
