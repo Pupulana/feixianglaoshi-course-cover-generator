@@ -11,8 +11,21 @@ VISION_ENDPOINT = os.getenv("VOLC_VISION_ENDPOINT", "https://ark.cn-beijing.volc
 VISION_MODEL = os.getenv("VOLC_VISION_MODEL", "doubao-seed-1-6-251015")
 
 def encode_image(image_path):
-    with open(image_path, "rb") as image_file:
-        return base64.b64encode(image_file.read()).decode('utf-8')
+    from PIL import Image
+    import io
+    
+    with Image.open(image_path) as img:
+        # 转换为 RGB (去除 Alpha 通道) 以便存为体积更小的 JPEG
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+            
+        # 限制分辨率上限，Vision 模型分析不需要原图大小
+        img.thumbnail((1280, 1280), Image.Resampling.LANCZOS)
+        
+        buffered = io.BytesIO()
+        img.save(buffered, format="JPEG", quality=80)
+        
+        return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
 
 def analyze_image(image_path):
@@ -98,7 +111,8 @@ def analyze_image(image_path):
     }
 
     try:
-        response = requests.post(VISION_ENDPOINT, headers=headers, json=payload, timeout=90)
+        # timeout 设置为 (连接超时: 30s, 读取超时: 120s)
+        response = requests.post(VISION_ENDPOINT, headers=headers, json=payload, timeout=(30, 120))
         
         if response.status_code == 200:
             result = response.json()
