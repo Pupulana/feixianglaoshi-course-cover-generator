@@ -32,20 +32,25 @@ with tab1:
 
     with col1:
         st.header("1️⃣ 输入")
-        url = st.text_input("教学动画 URL", "https://musk-online.fbcontent.cn/pub-musk-ai-studio/workflow/file/document/VcXtodDJ7Zeep4GcJ8vMxT.html")
+        url = st.text_input("教学动画 URL", "")
         
         if st.button("📸 截图并分析", type="primary"):
-            with st.spinner("正在截取动画画面..."):
-                screenshot_path = capture_from_url(url)
-            if screenshot_path and os.path.exists(screenshot_path):
-                st.session_state['screenshot'] = screenshot_path
-                st.image(screenshot_path, caption="动画截图", use_container_width=True)
-                with st.spinner("正在分析内容并生成提示词..."):
-                    result = analyze_image(screenshot_path)
-                    st.session_state['thinking'] = result.get("thinking", "")
-                    st.session_state['prompt'] = result.get("prompt", "")
+            if not url:
+                st.warning("请先输入动画 URL")
             else:
-                st.error("截图失败，请检查 URL 是否可访问。")
+                with st.spinner("正在截取动画画面..."):
+                    screenshot_path = capture_from_url(url)
+                if screenshot_path and os.path.exists(screenshot_path):
+                    st.session_state['screenshot'] = screenshot_path
+                    with st.spinner("正在分析内容并生成提示词..."):
+                        result = analyze_image(screenshot_path)
+                        st.session_state['thinking'] = result.get("thinking", "")
+                        st.session_state['prompt'] = result.get("prompt", "")
+                else:
+                    st.error("截图失败，请检查 URL 是否可访问。")
+        
+        if 'screenshot' in st.session_state and os.path.exists(st.session_state['screenshot']):
+            st.image(st.session_state['screenshot'], caption="动画截图", use_container_width=True)
 
         if 'thinking' in st.session_state and st.session_state['thinking']:
             with st.expander("💭 思考过程", expanded=False):
@@ -63,12 +68,15 @@ with tab1:
                 with st.spinner("正在生成封面..."):
                     output_path = generate_cover(st.session_state['prompt'])
                     if output_path and os.path.exists(output_path):
+                        st.session_state['generated_cover'] = output_path
                         st.success("✅ 封面生成成功！")
-                        st.image(output_path, caption="生成的封面", use_container_width=True)
-                        with open(output_path, "rb") as f:
-                            st.download_button("📥 下载封面", f, "course_cover.png", "image/png")
                     else:
                         st.error("封面生成失败。")
+            
+            if 'generated_cover' in st.session_state and os.path.exists(st.session_state['generated_cover']):
+                st.image(st.session_state['generated_cover'], caption="生成的封面", use_container_width=True)
+                with open(st.session_state['generated_cover'], "rb") as f:
+                    st.download_button("📥 下载封面", f, "course_cover.png", "image/png")
         else:
             st.info("👈 请先完成第一步")
 
