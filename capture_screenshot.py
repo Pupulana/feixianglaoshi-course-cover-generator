@@ -17,11 +17,24 @@ def capture_from_url(url, output_path="input_screenshot.png"):
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1280,800")
     chrome_options.add_argument("--force-device-scale-factor=2")
     
-    # Auto-download and setup ChromeDriver
-    service = Service(ChromeDriverManager().install())
+    import shutil
+    
+    # 针对 Streamlit Cloud (Linux环境) 的配置适配
+    chromium_path = shutil.which("chromium") or shutil.which("chromium-browser")
+    if chromium_path:
+        chrome_options.binary_location = chromium_path
+        
+    chromedriver_path = shutil.which("chromedriver")
+    if chromedriver_path:
+        service = Service(chromedriver_path)
+    else:
+        # 本地开发环境回退到 webdriver_manager
+        service = Service(ChromeDriverManager().install())
+        
     driver = webdriver.Chrome(service=service, options=chrome_options)
     
     try:
